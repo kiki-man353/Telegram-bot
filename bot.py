@@ -14,8 +14,8 @@ ADMIN_CHANNEL_ID = "-1004399480886"  # 👈 የእርስዎ Private ቻናል ID
 SUPABASE_URL = "https://xtkdjjryooketbgdreez.supabase.co"
 SUPABASE_KEY = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0"
-    "a2RqanJ5b29rZXRiZ2RyZWV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MzUwMTksImV4"
-    "cCI6MjEwMjIxMTAxOX0.Oi3LMmZX1m02Z3XPje-iXhQsg3pYDi6Zn80Cpi436Lk"
+    "a2RqanJ5b29rZXRiZ2RyZWV6InRlc2wiOiJhbm9uIiwiaWF0IjoxNzg2NjM1MDE5LCJleHAi"
+    "OjIxMDIyMTEwMTl9.Oi3LMmZX1m02Z3XPje-iXhQsg3pYDi6Zn80Cpi436Lk"
 )
 
 HEADERS = {
@@ -195,11 +195,15 @@ def send_welcome(message):
       pass
 
   text = (
-      "🔥 Www Earn Bot — New Task\n\n"
-      "🎯 A new earning task is waiting for you!\n\n"
-      "📲 Complete the task and collect your reward.\n\n"
-      "⚡ Don’t miss this opportunity!\n\n"
-      "👇 Click below to open Mini App"
+      "🔥 Www Earn Bot — New Instagram Task\n\n"
+      "🎯 A new Instagram earning task is now available!\n\n"
+      "📲 Complete the task and earn your reward.\n\n"
+      "💰 Mini App: $0.032 per approved account\n"
+      "⏱️ Approval/verification time: approximately 1–1.5 hours\n\n"
+      "🤖 Chat Bot: $0.025 per account\n"
+      "⏱️ Submit/processing time: approximately 30–50 minutes\n\n"
+      "⚡ Choose your preferred method and start working!\n\n"
+      "👇 Open the Mini App or type /task"
   )
 
   markup = types.InlineKeyboardMarkup()
@@ -541,11 +545,9 @@ def reply_to_support(message):
 
 # --- MAIN ENTRY POINT (RUNNING FLASK & BOT TOGETHER) ---
 if __name__ == "__main__":
-  # Flask ሰርቨሩን በሌላ Thread እናስነሳዋለን (Render ፖርት እንዲያገኝ)
   flask_thread = threading.Thread(target=run_flask)
   flask_thread.start()
 
-  # የቴሌግራም ቦቱን በሰርቨር ላይ እናስኬደዋለን
   while True:
     try:
       bot.infinity_polling(timeout=60, long_polling_timeout=60)
