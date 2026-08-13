@@ -1,9 +1,12 @@
+import os
 import random
 import string
+import threading
 import time
+from flask import Flask
+import requests
 import telebot
 from telebot import types
-import requests
 
 TOKEN = "8974330521:AAE_niErKnWPdQWtrmzWltd8LQ5aleUtj-E"
 ADMIN_CHANNEL_ID = "-1004399480886"  # 👈 የእርስዎ Private ቻናል ID
@@ -30,6 +33,22 @@ except Exception as e:
   print(e)
 
 user_data = {}
+
+# --- RENDER PORT BINDING FIX (FLASK WEB SERVER) ---
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+  return "Bot is running 24/7!"
+
+
+def run_flask():
+  port = int(os.environ.get("PORT", 10000))
+  app.run(host="0.0.0.0", port=port)
+
+
+# ------------------------------------------------
 
 
 def get_user(chat_id):
@@ -287,7 +306,6 @@ def handle_withdraw_address(message):
   user = get_user(chat_id)
   total_balance = user["task_balance"] + user["invite_balance"]
 
-  # ወደ ቻናል መላኪያ ፎርማት
   admin_markup = types.InlineKeyboardMarkup()
   btn_approve = types.InlineKeyboardButton(
       "✅ Approve", callback_data=f"wd_approve_{chat_id}"
@@ -319,11 +337,10 @@ def handle_withdraw_address(message):
 )
 def handle_withdrawal_decision(call):
   data_parts = call.data.split("_")
-  action = data_parts[1]  # approve ወይም reject
+  action = data_parts[1]
   target_user_id = int(data_parts[2])
 
   if action == "approve":
-    # ሲጸድቅ የпользователь ባላንስ ወደ 0 መቀነስ ይቻላል (አማራጭ)
     user = get_user(target_user_id)
     update_user(target_user_id, 0.0, 0.0, user["referrals"], user["referrer_id"])
 
@@ -522,10 +539,16 @@ def reply_to_support(message):
       bot.reply_to(message, f"❌ Error: {e}")
 
 
-# --- POLLING LOOP WITH TIMEOUT PROTECTION ---
-while True:
-  try:
-    bot.infinity_polling(timeout=60, long_polling_timeout=60)
-  except Exception as e:
-    print(f"Error: {e}")
-    time.sleep(5)
+# --- MAIN ENTRY POINT (RUNNING FLASK & BOT TOGETHER) ---
+if __name__ == "__main__":
+  # Flask ሰርቨሩን በሌላ Thread እናስነሳዋለን (Render ፖርት እንዲያገኝ)
+  flask_thread = threading.Thread(target=run_flask)
+  flask_thread.start()
+
+  # የቴሌግራም ቦቱን በሰርቨር ላይ እናስኬደዋለን
+  while True:
+    try:
+      bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    except Exception as e:
+      print(f"Error: {e}")
+      time.sleep(5)
