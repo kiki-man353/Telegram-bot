@@ -30,6 +30,7 @@ except Exception as e:
   print(e)
 
 user_data = {}
+admin_reply_states = {}  # አድሚኑ ለተጠቃሚ መልእክት ለመጻፍ ሲሞክር መረጃ ለመያዝ
 
 
 def get_user(chat_id):
@@ -206,6 +207,18 @@ def send_welcome(message):
   bot.send_message(chat_id, text)
 
 
+@bot.message_handler(commands=["support"])
+def support_command(message):
+  chat_id = message.chat.id
+  text = (
+      "🛠️ **Support Center**\n\n"
+      "If you have any questions, issues with task approvals, or need assistance, "
+      "please contact our official support channel or manager.\n\n"
+      "📢 Official Channel: https://t.me/wwearnoffice"
+  )
+  bot.send_message(chat_id, text, parse_mode="Markdown")
+
+
 # --- REPLY BUTTON HANDLERS ---
 @bot.message_handler(func=lambda message: message.text == "💰 Balance")
 def check_balance(message):
@@ -353,13 +366,13 @@ def handle_fb_cookies(message):
   data = user_data[chat_id]
 
   admin_markup = types.InlineKeyboardMarkup()
-  btn_approve = types.InlineKeyboardButton(
-      "✅ Approve", callback_data=f"approve_fb_{chat_id}"
+  btn_reply = types.InlineKeyboardButton(
+      "💬 Reply", callback_data=f"reply_fb_{chat_id}"
   )
   btn_reject = types.InlineKeyboardButton(
       "❌ Reject", callback_data=f"reject_fb_{chat_id}"
   )
-  admin_markup.add(btn_approve, btn_reject)
+  admin_markup.add(btn_reply, btn_reject)
 
   admin_text = (
       "🚨 New Facebook Cookies Submission:\n\n"
@@ -484,13 +497,13 @@ def confirm_ig_registration(call):
     data = user_data[chat_id]
 
     admin_markup = types.InlineKeyboardMarkup()
-    btn_approve = types.InlineKeyboardButton(
-        "✅ Approve", callback_data=f"approve_ig_{chat_id}"
+    btn_reply = types.InlineKeyboardButton(
+        "💬 Reply", callback_data=f"reply_ig_{chat_id}"
     )
     btn_reject = types.InlineKeyboardButton(
         "❌ Reject", callback_data=f"reject_ig_{chat_id}"
     )
-    admin_markup.add(btn_approve, btn_reject)
+    admin_markup.add(btn_reply, btn_reject)
 
     admin_text = (
         "🚨 New Instagram Task Submission:\n\n"
@@ -521,83 +534,68 @@ def confirm_ig_registration(call):
     del user_data[chat_id]
 
 
-# --- ADMIN APPROVAL HANDLERS ---
+# --- ADMIN ACTION HANDLERS (REPLY & REJECT) ---
 @bot.callback_query_handler(
-    func=lambda call: call.data.startswith("approve_fb_")
-    or call.data.startswith("reject_fb_")
+    func=lambda call: call.data.startswith("reply_fb_")
+    or call.data.startswith("reply_ig_")
 )
-def handle_admin_fb_decision(call):
+def handle_admin_reply_init(call):
   data_parts = call.data.split("_")
-  action = data_parts[0]
-  target_user_id = int(data_parts[3])
+  target_user_id = int(data_parts[2])
+  admin_chat_id = call.message.chat.id
 
-  if action == "approve":
-    task_reward = 0.056
-    add_task_balance_with_commission(target_user_id, task_reward)
-    try:
-      bot.send_message(
-          target_user_id,
-          "🎉 Congratulations! Your Facebook task has been APPROVED ✅\n$0.056"
-          " has been added to your Task Balance.",
-      )
-    except:
-      pass
-    bot.edit_message_text(
-        f"{call.message.text}\n\nStatus: APPROVED ✅",
-        call.message.chat.id,
-        call.message.message_id,
+  # አድሚኑ መልእክት እንዲጽፍ ያስችለዋል
+  admin_reply_states[admin_chat_id] = target_user_id
+  bot.send_message(
+      admin_chat_id,
+      "✍️ Please send the message/text you want to reply to this user:",
+  )
+  bot.answer_callback_query(call.id)
+
+
+@bot.message_handler(
+    func=lambda message: message.chat.id in admin_reply_states
+)
+def handle_admin_text_reply(message):
+  admin_chat_id = message.chat.id
+  target_user_id = admin_reply_states[admin_chat_id]
+  reply_text = message.text
+
+  try:
+    # ለተጠቃሚው መልእክቱን መላክ (በዚህ ውስጥ ታስክ  अप्रूवድ ሆኖ ሲላክም ሆነ የተለየ መልእክት ሲጻፍ ይቻላል)
+    add_task_balance_with_commission(target_user_id, 0.03)  # እንደ አማራጭ ወይም በቀጥታ ጽሁፍ
+    bot.send_message(
+        target_user_id,
+        f"🎉 Update from Admin:\n\n{reply_text}\n\n✅ Task Approved & Balance Added!",
     )
-  elif action == "reject":
-    try:
-      bot.send_message(
-          target_user_id, "❌ Your Facebook task submission was REJECTED."
-      )
-    except:
-      pass
-    bot.edit_message_text(
-        f"{call.message.text}\n\nStatus: REJECTED ❌",
-        call.message.chat.id,
-        call.message.message_id,
-    )
+    bot.send_message(admin_chat_id, "✅ Reply sent and task approved successfully!")
+  except Exception as e:
+    bot.send_message(admin_chat_id, f"❌ Failed to send message: {e}")
+
+  del admin_reply_states[admin_chat_id]
 
 
 @bot.callback_query_handler(
-    func=lambda call: call.data.startswith("approve_ig_")
+    func=lambda call: call.data.startswith("reject_fb_")
     or call.data.startswith("reject_ig_")
 )
-def handle_admin_ig_decision(call):
+def handle_admin_reject(call):
   data_parts = call.data.split("_")
-  action = data_parts[0]
-  target_user_id = int(data_parts[3])
+  target_user_id = int(data_parts[2])
 
-  if action == "approve":
-    task_reward = 0.03
-    add_task_balance_with_commission(target_user_id, task_reward)
-    try:
-      bot.send_message(
-          target_user_id,
-          "🎉 Congratulations! Your Instagram task has been APPROVED ✅\n$0.03"
-          " has been added to your Task Balance.",
-      )
-    except:
-      pass
-    bot.edit_message_text(
-        f"{call.message.text}\n\nStatus: APPROVED ✅",
-        call.message.chat.id,
-        call.message.message_id,
+  try:
+    bot.send_message(
+        target_user_id, "System busy please retry"
     )
-  elif action == "reject":
-    try:
-      bot.send_message(
-          target_user_id, "❌ Your Instagram task submission was REJECTED."
-      )
-    except:
-      pass
-    bot.edit_message_text(
-        f"{call.message.text}\n\nStatus: REJECTED ❌",
-        call.message.chat.id,
-        call.message.message_id,
-    )
+  except:
+    pass
+
+  bot.edit_message_text(
+      f"{call.message.text}\n\nStatus: REJECTED ❌ (System busy message sent)",
+      call.message.chat.id,
+      call.message.message_id,
+  )
+  bot.answer_callback_query(call.id, text="Rejected & notice sent.")
 
 
 if __name__ == "__main__":
