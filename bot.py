@@ -1,15 +1,13 @@
-import os
 import random
 import string
-import threading
 import time
-from flask import Flask
 import requests
+import pyotp
 import telebot
 from telebot import types
 
 TOKEN = "8974330521:AAE_niErKnWPdQWtrmzWltd8LQ5aleUtj-E"
-ADMIN_CHANNEL_ID = "-1004399480886"  # 👈 የእርስዎ Private ቻናል ID
+ADMIN_CHANNEL_ID = "-1004399480886"
 
 SUPABASE_URL = "https://xtkdjjryooketbgdreez.supabase.co"
 SUPABASE_KEY = (
@@ -26,7 +24,6 @@ HEADERS = {
 }
 
 bot = telebot.TeleBot(TOKEN)
-
 try:
   bot.remove_webhook()
 except Exception as e:
@@ -34,59 +31,45 @@ except Exception as e:
 
 user_data = {}
 
-# --- RENDER PORT BINDING FIX (FLASK WEB SERVER) ---
-app = Flask(__name__)
-
-
-@app.route("/")
-def home():
-  return "Bot is running 24/7!"
-
-
-def run_flask():
-  port = int(os.environ.get("PORT", 10000))
-  app.run(host="0.0.0.0", port=port)
-
-
-# ------------------------------------------------
-
 
 def get_user(chat_id):
   url = f"{SUPABASE_URL}/rest/v1/users?chat_id=eq.{chat_id}&select=*"
-  response = requests.get(url, headers=HEADERS)
+  try:
+    response = requests.get(url, headers=HEADERS, timeout=10)
+    if response.status_code == 200:
+      data = response.json()
+      if not data:
+        new_user = {
+            "chat_id": chat_id,
+            "task_balance": 0.000,
+            "invite_balance": 0.000,
+            "referrals": 0,
+            "referrer_id": None,
+        }
+        insert_url = f"{SUPABASE_URL}/rest/v1/users"
+        requests.post(insert_url, headers=HEADERS, json=new_user, timeout=10)
+        return {
+            "task_balance": 0.000,
+            "invite_balance": 0.000,
+            "referrals": 0,
+            "referrer_id": None,
+        }
+      else:
+        return {
+            "task_balance": float(data[0].get("task_balance", 0.0)),
+            "invite_balance": float(data[0].get("invite_balance", 0.0)),
+            "referrals": int(data[0].get("referrals", 0)),
+            "referrer_id": data[0].get("referrer_id"),
+        }
+  except Exception as e:
+    print(f"Database connection error: {e}")
 
-  if response.status_code == 200:
-    data = response.json()
-    if not data:
-      new_user = {
-          "chat_id": chat_id,
-          "task_balance": 0.000,
-          "invite_balance": 0.000,
-          "referrals": 0,
-          "referrer_id": None,
-      }
-      insert_url = f"{SUPABASE_URL}/rest/v1/users"
-      requests.post(insert_url, headers=HEADERS, json=new_user)
-      return {
-          "task_balance": 0.000,
-          "invite_balance": 0.000,
-          "referrals": 0,
-          "referrer_id": None,
-      }
-    else:
-      return {
-          "task_balance": float(data[0].get("task_balance", 0.0)),
-          "invite_balance": float(data[0].get("invite_balance", 0.0)),
-          "referrals": int(data[0].get("referrals", 0)),
-          "referrer_id": data[0].get("referrer_id"),
-      }
-  else:
-    return {
-        "task_balance": 0.000,
-        "invite_balance": 0.000,
-        "referrals": 0,
-        "referrer_id": None,
-    }
+  return {
+      "task_balance": 0.000,
+      "invite_balance": 0.000,
+      "referrals": 0,
+      "referrer_id": None,
+  }
 
 
 def update_user(
@@ -100,8 +83,10 @@ def update_user(
   }
   if referrer_id is not None:
     update_data["referrer_id"] = referrer_id
-
-  requests.patch(url, headers=HEADERS, json=update_data)
+  try:
+    requests.patch(url, headers=HEADERS, json=update_data, timeout=10)
+  except Exception as e:
+    print(f"Database update error: {e}")
 
 
 def add_task_balance_with_commission(chat_id, earned_amount):
@@ -127,7 +112,6 @@ def add_task_balance_with_commission(chat_id, earned_amount):
         ref_user["referrals"],
         ref_user["referrer_id"],
     )
-
     try:
       bot.send_message(
           referrer_id,
@@ -138,18 +122,30 @@ def add_task_balance_with_commission(chat_id, earned_amount):
       pass
 
 
-def generate_account_info():
+def generate_fb_info():
   first_names = ["DHEARYE", "SAMUEL", "DAVID", "JOHN", "MICHAEL"]
   last_names = ["SAAWAIYE", "SMITH", "JOHNSON", "BROWN", "WILLIAMS"]
   f_name = random.choice(first_names)
   l_name = random.choice(last_names)
   full_name = f"{f_name} {l_name}"
-  random_num = "".join(random.choices(string.digits, k=3))
-  base_login = f"{f_name.lower()}_{l_name.lower()}{random_num}"
   password = "".join(
       random.choices(string.ascii_letters + string.digits + "!@#$%", k=10)
   )
-  return full_name, base_login, password
+  return full_name, password
+
+
+def generate_ig_info():
+  first_names = ["alex", "emma", "liam", "sophia", "noah"]
+  last_names = ["smith", "jones", "brown", "miller", "davis"]
+  f_name = random.choice(first_names)
+  l_name = random.choice(last_names)
+  full_name = f"{f_name.capitalize()} {l_name.capitalize()}"
+  random_num = "".join(random.choices(string.digits, k=3))
+  username = f"{f_name}_{l_name}{random_num}"
+  password = "".join(
+      random.choices(string.ascii_letters + string.digits + "!@#$%", k=10)
+  )
+  return full_name, username, password
 
 
 def get_main_keyboard():
@@ -206,291 +202,356 @@ def send_welcome(message):
       "👇 Open the Mini App or type /task"
   )
 
-  markup = types.InlineKeyboardMarkup()
-  mini_app_url = "https://kiki-man353.github.io/Insta/"
-  btn_webapp = types.InlineKeyboardButton(
-      "🚀 Open App", web_app=types.WebAppInfo(url=mini_app_url)
-  )
-  markup.add(btn_webapp)
-
   bot.send_message(chat_id, "📌 Main Menu", reply_markup=get_main_keyboard())
-  bot.send_message(chat_id, text, reply_markup=markup)
+  bot.send_message(chat_id, text)
 
 
-# --- STANDARD HANDLERS ---
+# --- REPLY BUTTON HANDLERS ---
+@bot.message_handler(func=lambda message: message.text == "💰 Balance")
+def check_balance(message):
+  chat_id = message.chat.id
+  user = get_user(chat_id)
+  text = (
+      "💰 **Your Account Balance:**\n\n"
+      f"🔹 Task Balance: **${user['task_balance']:.3f}**\n"
+      f"🔸 Invite Balance: **${user['invite_balance']:.3f}**\n\n"
+      f"📊 Total Balance: **${(user['task_balance'] + user['invite_balance']):.3f}**"
+  )
+  bot.send_message(chat_id, text, parse_mode="Markdown")
+
+
+@bot.message_handler(func=lambda message: message.text == "📤 Withdraw")
+def withdraw_money(message):
+  chat_id = message.chat.id
+  user = get_user(chat_id)
+  total_balance = user["task_balance"] + user["invite_balance"]
+  text = (
+      "📤 **Withdrawal Menu**\n\n"
+      f"Your Total Balance: **${total_balance:.3f}**\n\n"
+      "⚠️ Minimum withdrawal limit is **$1.00**.\n"
+      "Please accumulate enough balance to request a payout."
+  )
+  bot.send_message(chat_id, text, parse_mode="Markdown")
+
+
+@bot.message_handler(func=lambda message: message.text == "👩‍👧‍👦 REFERRAL 👩‍👧‍👦")
+def referral_menu(message):
+  chat_id = message.chat.id
+  user = get_user(chat_id)
+  bot_info = bot.get_me()
+  ref_link = f"https://t.me/{bot_info.username}?start=ref_{chat_id}"
+
+  text = (
+      "👩‍👧‍👦 **Referral Program**\n\n"
+      "Invite your friends and earn **10% commission** from their task earnings!\n\n"
+      f"👥 Total Referrals: **{user['referrals']}**\n"
+      f"🎁 Invite Balance Earnings: **${user['invite_balance']:.3f}**\n\n"
+      "🔗 **Your Referral Link:**\n"
+      f"`{ref_link}`"
+  )
+  bot.send_message(chat_id, text, parse_mode="Markdown")
+
+
 @bot.message_handler(commands=["task"])
 def show_tasks_command(message):
   markup = types.InlineKeyboardMarkup()
-  btn_create = types.InlineKeyboardButton(
-      "📱 Create Inst (2FA) ($0.025)", callback_data="create_inst"
+  btn_fb = types.InlineKeyboardButton(
+      "Fb Task ($0.055)", callback_data="task_fb"
   )
-  markup.add(btn_create)
+  btn_ig = types.InlineKeyboardButton(
+      "Ig Task ($0.03)", callback_data="task_ig"
+  )
+  markup.add(btn_fb, btn_ig)
   bot.send_message(
-      message.chat.id,
-      "👉 Please select a task:",
+      message.chat.id, "👉 Please select a category:", reply_markup=markup
+  )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_tasks")
+def back_to_tasks(call):
+  markup = types.InlineKeyboardMarkup()
+  btn_fb = types.InlineKeyboardButton(
+      "Fb Task ($0.055)", callback_data="task_fb"
+  )
+  btn_ig = types.InlineKeyboardButton(
+      "Ig Task ($0.03)", callback_data="task_ig"
+  )
+  markup.add(btn_fb, btn_ig)
+  bot.edit_message_text(
+      "👉 Please select a category:",
+      call.message.chat.id,
+      call.message.message_id,
       reply_markup=markup,
   )
 
 
-@bot.message_handler(
-    func=lambda message: message.text
-    in ["💰 Balance", "📤 Withdraw", "👩‍👧‍👦 REFERRAL 👩‍👧‍👦"]
-)
-def handle_menu_buttons(message):
-  chat_id = message.chat.id
-  user = get_user(chat_id)
+# --- FB TASK FLOW ---
+@bot.callback_query_handler(func=lambda call: call.data == "task_fb")
+def select_fb_task(call):
+  markup = types.InlineKeyboardMarkup()
+  btn_cookies = types.InlineKeyboardButton(
+      "Cookies ($0.056)", callback_data="fb_cookies"
+  )
+  btn_back = types.InlineKeyboardButton("🔙 Back", callback_data="back_to_tasks")
+  markup.add(btn_cookies, btn_back)
 
-  if message.text == "💰 Balance":
-    total_balance = user["task_balance"] + user["invite_balance"]
-    text = (
-        "💳 Your Account Balances:\n\n"
-        f"📱 Task Balance: ${user['task_balance']:.4f}\n"
-        f"🎁 Invite Balance: ${user['invite_balance']:.4f}\n"
-        "-----------------------------------\n"
-        f"💰 Total Balance: ${total_balance:.4f}"
-    )
-    bot.send_message(message.chat.id, text)
-
-  elif message.text == "📤 Withdraw":
-    total_balance = user["task_balance"] + user["invite_balance"]
-    if total_balance >= 1.00:
-      markup = types.InlineKeyboardMarkup()
-      btn_usdt = types.InlineKeyboardButton(
-          "USDT (BEP-20)", callback_data="withdraw_usdt"
-      )
-      markup.add(btn_usdt)
-
-      bot.send_message(
-          message.chat.id,
-          "📤 Choose withdraw method:",
-          reply_markup=markup,
-      )
-    else:
-      bot.send_message(
-          message.chat.id,
-          f"⚠️ Minimum withdrawal is $1.00\nYour total balance is"
-          f" ${total_balance:.4f}",
-      )
-
-  elif message.text == "👩‍👧‍👦 REFERRAL 👩‍👧‍👦":
-    bot_username = bot.get_me().username
-    ref_link = f"https://t.me/{bot_username}?start=ref_{chat_id}"
-    text = (
-        "👥 Referral Program (10% Commission):\n\n"
-        f"🔗 Your Link: {ref_link}\n\n"
-        f"👤 Total Invited: {user['referrals']} users\n"
-        "🎁 Reward: You get 10% of what your referrals earn, added to your"
-        " Invite Balance!"
-    )
-    bot.send_message(message.chat.id, text)
+  bot.edit_message_text(
+      "Select the fb task please select from below:",
+      call.message.chat.id,
+      call.message.message_id,
+      reply_markup=markup,
+  )
 
 
-# --- WITHDRAW HANDLERS ---
-@bot.callback_query_handler(func=lambda call: call.data == "withdraw_usdt")
-def select_withdraw_usdt(call):
+@bot.callback_query_handler(func=lambda call: call.data == "fb_cookies")
+def start_fb_cookies_task(call):
   chat_id = call.message.chat.id
-  user_data[chat_id] = {"waiting_for_withdraw_address": True}
+  full_name, password = generate_fb_info()
+
+  user_data[chat_id] = {
+      "task_type": "fb_cookies",
+      "full_name": full_name,
+      "password": password,
+      "step": "waiting_for_fb_uid",
+  }
 
   text = (
-      "You selected USDT (BEP-20).\n"
-      "📉 Fee: $0.025\n"
-      "🔢 Minimum withdrawal amount: $0.20\n"
-      "📤 Enter your USDT (BEP-20) address:"
+      "Task: 📱 Facebook Cookies\n\n"
+      "Please create a new account using the details below:\n"
+      f"First name & Last name: {full_name}\n"
+      f"Password: {password}\n\n"
+      "👉 Please enter the FB UID:"
   )
   bot.edit_message_text(text, chat_id, call.message.message_id)
 
 
 @bot.message_handler(
     func=lambda message: message.chat.id in user_data
-    and user_data[message.chat.id].get("waiting_for_withdraw_address")
+    and user_data[message.chat.id].get("step") == "waiting_for_fb_uid"
 )
-def handle_withdraw_address(message):
+def handle_fb_uid(message):
   chat_id = message.chat.id
-  address = message.text
-  user = get_user(chat_id)
-  total_balance = user["task_balance"] + user["invite_balance"]
+  fb_uid = message.text.strip()
 
-  admin_markup = types.InlineKeyboardMarkup()
-  btn_approve = types.InlineKeyboardButton(
-      "✅ Approve", callback_data=f"wd_approve_{chat_id}"
-  )
-  btn_reject = types.InlineKeyboardButton(
-      "❌ Reject", callback_data=f"wd_reject_{chat_id}"
-  )
-  admin_markup.add(btn_approve, btn_reject)
+  user_data[chat_id]["fb_uid"] = fb_uid
+  user_data[chat_id]["step"] = "waiting_for_fb_cookies"
 
-  admin_text = (
-      "📤 New Withdrawal Request:\n\n"
-      f"User ID: `{chat_id}`\n"
-      f"Amount: `${total_balance:.4f}`\n"
-      f"USDT Address: `{address}`"
-  )
-
-  bot.send_message(ADMIN_CHANNEL_ID, admin_text, reply_markup=admin_markup)
   bot.send_message(
       chat_id,
-      "✅ Your withdrawal request has been submitted to admin for review!",
+      "✅ Your UID has been saved successfully!\n\n👉 Now Paste your FB Cookies"
+      " below:",
   )
-
-  del user_data[chat_id]
-
-
-@bot.callback_query_handler(
-    func=lambda call: call.data.startswith("wd_approve_")
-    or call.data.startswith("wd_reject_")
-)
-def handle_withdrawal_decision(call):
-  data_parts = call.data.split("_")
-  action = data_parts[1]
-  target_user_id = int(data_parts[2])
-
-  if action == "approve":
-    user = get_user(target_user_id)
-    update_user(target_user_id, 0.0, 0.0, user["referrals"], user["referrer_id"])
-
-    try:
-      bot.send_message(
-          target_user_id,
-          "🎉 Your withdrawal request has been APPROVED ✅ and sent to your"
-          " address!",
-      )
-    except:
-      pass
-
-    bot.edit_message_text(
-        f"{call.message.text}\n\nStatus: WITHDRAWAL APPROVED ✅",
-        call.message.chat.id,
-        call.message.message_id,
-    )
-
-  elif action == "reject":
-    try:
-      bot.send_message(
-          target_user_id,
-          "❌ Your withdrawal request has been REJECTED by admin.",
-      )
-    except:
-      pass
-
-    bot.edit_message_text(
-        f"{call.message.text}\n\nStatus: WITHDRAWAL REJECTED ❌",
-        call.message.chat.id,
-        call.message.message_id,
-    )
-
-
-# --- TASK HANDLERS ---
-@bot.callback_query_handler(func=lambda call: call.data == "create_inst")
-def start_inst_task(call):
-  full_name, login, password = generate_account_info()
-  user_data[call.message.chat.id] = {
-      "full_name": full_name,
-      "login": login,
-      "password": password,
-  }
-
-  text = (
-      "Task: 📱 Create Inst (2FA)\n\n"
-      "Description: Create a new account using the details below:\n"
-      f"First name: {full_name}\n"
-      f"Login: {login}\n"
-      f"Password: {password}\n\n"
-      "Please enter your 2FA key to get the code:"
-  )
-
-  bot.edit_message_text(text, call.message.chat.id, call.message.message_id)
 
 
 @bot.message_handler(
     func=lambda message: message.chat.id in user_data
-    and "2fa_entered" not in user_data[message.chat.id]
-    and not user_data[message.chat.id].get("waiting_for_support")
+    and user_data[message.chat.id].get("step") == "waiting_for_fb_cookies"
 )
-def handle_2fa_key(message):
+def handle_fb_cookies(message):
   chat_id = message.chat.id
-  user_data[chat_id]["2fa_key"] = message.text
-  user_data[chat_id]["2fa_entered"] = True
+  fb_cookies = message.text.strip()
+  data = user_data[chat_id]
 
-  one_time_code = "".join(random.choices(string.digits, k=6))
-  user_data[chat_id]["one_time_code"] = one_time_code
+  admin_markup = types.InlineKeyboardMarkup()
+  btn_approve = types.InlineKeyboardButton(
+      "✅ Approve", callback_data=f"approve_fb_{chat_id}"
+  )
+  btn_reject = types.InlineKeyboardButton(
+      "❌ Reject", callback_data=f"reject_fb_{chat_id}"
+  )
+  admin_markup.add(btn_approve, btn_reject)
 
+  admin_text = (
+      "🚨 New Facebook Cookies Submission:\n\n"
+      f"User ID: {chat_id}\n"
+      f"Full Name: {data['full_name']}\n"
+      f"Password: {data['password']}\n"
+      f"FB UID: {data['fb_uid']}\n"
+      f"Cookies: {fb_cookies}"
+  )
+
+  bot.send_message(ADMIN_CHANNEL_ID, admin_text, reply_markup=admin_markup)
+
+  join_markup = types.InlineKeyboardMarkup()
+  btn_join = types.InlineKeyboardButton(
+      "JOIN CHANNEL", url="https://t.me/wwearnoffice"
+  )
+  join_markup.add(btn_join)
+
+  success_text = (
+      "✅ Task submitted successfully!\n\n"
+      "⏱️ Please note: Account verification may take 1–2 hours."
+  )
+  bot.send_message(chat_id, success_text, reply_markup=join_markup)
+
+  del user_data[chat_id]
+
+
+# --- IG TASK FLOW ---
+@bot.callback_query_handler(func=lambda call: call.data == "task_ig")
+def select_ig_task(call):
+  chat_id = call.message.chat.id
   markup = types.InlineKeyboardMarkup()
-  btn_registered = types.InlineKeyboardButton(
-      "✅ Account registered", callback_data="account_registered"
+  btn_start = types.InlineKeyboardButton("Start", callback_data="ig_start")
+  btn_cancel = types.InlineKeyboardButton("Cancel", callback_data="ig_cancel")
+  markup.add(btn_start, btn_cancel)
+
+  text = (
+      "📱 Ig Task ($0.03)\n\n"
+      "⏱️ Review Time: 30–50 Min\n\n"
+      "Choose an option below to proceed:"
   )
-  markup.add(btn_registered)
-
-  bot.send_message(chat_id, f"Your one-time code is: {one_time_code}")
-  bot.send_message(
-      chat_id, "👉 Press the button to confirm registration:", reply_markup=markup
+  bot.edit_message_text(
+      text, chat_id, call.message.message_id, reply_markup=markup
   )
 
 
-@bot.callback_query_handler(func=lambda call: call.data == "account_registered")
-def confirm_registration(call):
+@bot.callback_query_handler(func=lambda call: call.data == "ig_cancel")
+def cancel_ig_task(call):
+  chat_id = call.message.chat.id
+  if chat_id in user_data:
+    del user_data[chat_id]
+  bot.edit_message_text(
+      "❌ IG Task cancelled.", chat_id, call.message.message_id
+  )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "ig_start")
+def start_ig_task_details(call):
+  chat_id = call.message.chat.id
+  full_name, username, password = generate_ig_info()
+
+  user_data[chat_id] = {
+      "task_type": "ig_2fa",
+      "full_name": full_name,
+      "username": username,
+      "password": password,
+      "step": "waiting_for_ig_2fa",
+  }
+
+  text = (
+      "📱 IG Task Details:\n\n"
+      f"First name: {full_name}\n"
+      f"Username: {username}\n"
+      f"Password: {password}\n\n"
+      "👉 Please enter your 2fa key to get the code:"
+  )
+  bot.edit_message_text(text, chat_id, call.message.message_id)
+
+
+@bot.message_handler(
+    func=lambda message: message.chat.id in user_data
+    and user_data[message.chat.id].get("step") == "waiting_for_ig_2fa"
+)
+def handle_ig_2fa_key(message):
+  chat_id = message.chat.id
+  secret_key = message.text.replace(" ", "").strip().upper()
+
+  try:
+    totp = pyotp.TOTP(secret_key)
+    one_time_code = totp.now()
+
+    user_data[chat_id]["2fa_key"] = secret_key
+    user_data[chat_id]["one_time_code"] = one_time_code
+
+    markup = types.InlineKeyboardMarkup()
+    btn_confirm = types.InlineKeyboardButton(
+        "✅ Confirm Registration", callback_data="ig_confirm"
+    )
+    btn_cancel = types.InlineKeyboardButton(
+        "❌ Cancel", callback_data="ig_cancel"
+    )
+    markup.add(btn_confirm, btn_cancel)
+
+    bot.send_message(
+        chat_id, f"Your one time code is: <code>{one_time_code}</code>", parse_mode="HTML"
+    )
+    bot.send_message(
+        chat_id,
+        "👉 Press the button to confirm registration or cancel the task:",
+        reply_markup=markup,
+    )
+  except Exception as e:
+    bot.send_message(
+        chat_id, "❌ Invalid 2FA Key! Please check the key and send it again correctly."
+    )
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "ig_confirm")
+def confirm_ig_registration(call):
   chat_id = call.message.chat.id
   if chat_id in user_data:
     data = user_data[chat_id]
 
     admin_markup = types.InlineKeyboardMarkup()
     btn_approve = types.InlineKeyboardButton(
-        "✅ Approve", callback_data=f"approve_{chat_id}"
+        "✅ Approve", callback_data=f"approve_ig_{chat_id}"
     )
     btn_reject = types.InlineKeyboardButton(
-        "❌ Reject", callback_data=f"reject_{chat_id}"
+        "❌ Reject", callback_data=f"reject_ig_{chat_id}"
     )
     admin_markup.add(btn_approve, btn_reject)
 
     admin_text = (
-        "New Task Submission:\n\n"
+        "🚨 New Instagram Task Submission:\n\n"
         f"User ID: {chat_id}\n"
-        f"FullName: {data['full_name']}\n"
-        f"Login: {data['login']}\n"
+        f"Full Name: {data['full_name']}\n"
+        f"Username: {data['username']}\n"
         f"Password: {data['password']}\n"
         f"2FA Key: {data.get('2fa_key', 'N/A')}\n"
         f"Generated Code: {data.get('one_time_code', 'N/A')}"
     )
 
     bot.send_message(ADMIN_CHANNEL_ID, admin_text, reply_markup=admin_markup)
-    bot.edit_message_text(
-        "✅ Your report has been submitted to admin for verification!",
-        chat_id,
-        call.message.message_id,
+
+    join_markup = types.InlineKeyboardMarkup()
+    btn_join = types.InlineKeyboardButton(
+        "JOIN CHANNEL", url="https://t.me/wwearnoffice"
     )
+    join_markup.add(btn_join)
+
+    success_text = (
+        "✅ Task submitted successfully!\n\n"
+        "⏱️ Please Account Verification may take 1-2 h"
+    )
+    bot.edit_message_text(
+        success_text, chat_id, call.message.message_id, reply_markup=join_markup
+    )
+
     del user_data[chat_id]
 
 
+# --- ADMIN APPROVAL HANDLERS ---
 @bot.callback_query_handler(
-    func=lambda call: call.data.startswith("approve_")
-    or call.data.startswith("reject_")
+    func=lambda call: call.data.startswith("approve_fb_")
+    or call.data.startswith("reject_fb_")
 )
-def handle_admin_decision(call):
+def handle_admin_fb_decision(call):
   data_parts = call.data.split("_")
   action = data_parts[0]
-  target_user_id = int(data_parts[1])
+  target_user_id = int(data_parts[3])
 
   if action == "approve":
-    task_reward = 0.025
+    task_reward = 0.056
     add_task_balance_with_commission(target_user_id, task_reward)
-
     try:
       bot.send_message(
           target_user_id,
-          "🎉 Congratulations! Your task has been APPROVED ✅\n$0.025 has been"
-          " added to your Task Balance.",
+          "🎉 Congratulations! Your Facebook task has been APPROVED ✅\n$0.056"
+          " has been added to your Task Balance.",
       )
     except:
       pass
-
     bot.edit_message_text(
         f"{call.message.text}\n\nStatus: APPROVED ✅",
         call.message.chat.id,
         call.message.message_id,
     )
-
   elif action == "reject":
     try:
-      bot.send_message(target_user_id, "❌ Report rejected.")
+      bot.send_message(
+          target_user_id, "❌ Your Facebook task submission was REJECTED."
+      )
     except:
       pass
     bot.edit_message_text(
@@ -500,56 +561,49 @@ def handle_admin_decision(call):
     )
 
 
-# --- SUPPORT SYSTEM HANDLERS ---
-@bot.message_handler(commands=["support"])
-def support_command(message):
-  bot.send_message(
-      message.chat.id, "📩 Please enter your question/issue for support:"
-  )
-  user_data[message.chat.id] = {"waiting_for_support": True}
-
-
-@bot.message_handler(
-    func=lambda message: message.chat.id in user_data
-    and user_data[message.chat.id].get("waiting_for_support")
+@bot.callback_query_handler(
+    func=lambda call: call.data.startswith("approve_ig_")
+    or call.data.startswith("reject_ig_")
 )
-def handle_support_query(message):
-  chat_id = message.chat.id
-  query_text = message.text
+def handle_admin_ig_decision(call):
+  data_parts = call.data.split("_")
+  action = data_parts[0]
+  target_user_id = int(data_parts[3])
 
-  support_text = f"📩 #Support_Query\nUser ID: `{chat_id}`\n\nQuestion: {query_text}"
-  bot.send_message(ADMIN_CHANNEL_ID, support_text)
-
-  bot.send_message(
-      chat_id, "✅ Your message has been sent to support. We will reply soon."
-  )
-  del user_data[chat_id]
-
-
-@bot.message_handler(
-    func=lambda message: str(message.chat.id) == str(ADMIN_CHANNEL_ID)
-    and message.reply_to_message
-)
-def reply_to_support(message):
-  reply_msg = message.reply_to_message.text
-  if reply_msg and "#Support_Query" in reply_msg:
+  if action == "approve":
+    task_reward = 0.03
+    add_task_balance_with_commission(target_user_id, task_reward)
     try:
-      lines = reply_msg.split("\n")
-      user_id = int(lines[1].replace("User ID: `", "").replace("`", ""))
+      bot.send_message(
+          target_user_id,
+          "🎉 Congratulations! Your Instagram task has been APPROVED ✅\n$0.03"
+          " has been added to your Task Balance.",
+      )
+    except:
+      pass
+    bot.edit_message_text(
+        f"{call.message.text}\n\nStatus: APPROVED ✅",
+        call.message.chat.id,
+        call.message.message_id,
+    )
+  elif action == "reject":
+    try:
+      bot.send_message(
+          target_user_id, "❌ Your Instagram task submission was REJECTED."
+      )
+    except:
+      pass
+    bot.edit_message_text(
+        f"{call.message.text}\n\nStatus: REJECTED ❌",
+        call.message.chat.id,
+        call.message.message_id,
+    )
 
-      bot.send_message(user_id, f"💬 Support Reply:\n\n{message.text}")
-      bot.reply_to(message, "✅ Reply sent to user.")
-    except Exception as e:
-      bot.reply_to(message, f"❌ Error: {e}")
 
-
-# --- MAIN ENTRY POINT (RUNNING FLASK & BOT TOGETHER) ---
 if __name__ == "__main__":
-  flask_thread = threading.Thread(target=run_flask)
-  flask_thread.start()
-
   while True:
     try:
+      print("Bot is running...")
       bot.infinity_polling(timeout=60, long_polling_timeout=60)
     except Exception as e:
       print(f"Error: {e}")
